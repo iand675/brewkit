@@ -8,6 +8,7 @@ import           Data.Text (Text)
 import qualified Data.Text    as T
 import qualified Data.Text.IO as T
 import           Options.Applicative hiding (Success, Failure)
+import           System.Directory
 import           System.Exit
 import           Prelude             hiding (takeWhile)
 
@@ -87,15 +88,19 @@ commitMessageParser = do
   endOfLine
   endOfLine
   body <- manyTill (takeWhile1 (not . isEndOfLine) <* endOfLine) endOfLine <?> "Body"
-  footer <- manyTill (takeWhile1 (not . isEndOfLine) <* endOfLine) (endOfInput) <?> "Footer"
+  footer <- manyTill (takeWhile1 (not . isEndOfLine) <* endOfLine) (endOfLine <|> endOfInput) <?> "Footer"
   return $ CommitMessage type_ scope subject body footer
 
 main = do
   args <- execParser $ info commandParser idm
   case args of
     InstallHooks -> do
-      T.writeFile ".git/hooks/commit-msg" "#!/bin/sh\nbrewkit validate:commit:message $1"
+      let commitMsgHookPath = ".git/hooks/commit-msg"
+      T.writeFile commitMsgHookPath "#!/bin/sh\nbrewkit validate:commit:message $1\n"
+      perms <- getPermissions commitMsgHookPath
+      setPermissions commitMsgHookPath $ perms { executable = True }
     ValidateCommitMessage path -> do
+      T.putStrLn "Validating commit message format..."
       msg <- T.readFile path
       case validateCommitMessage msg of
         Left errs -> do
