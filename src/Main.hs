@@ -95,10 +95,7 @@ main = do
   args <- execParser $ info commandParser idm
   case args of
     InstallHooks -> do
-      let commitMsgHookPath = ".git/hooks/commit-msg"
-      T.writeFile commitMsgHookPath "#!/bin/sh\nbrewkit validate:commit:message $1\n"
-      perms <- getPermissions commitMsgHookPath
-      setPermissions commitMsgHookPath $ perms { executable = True }
+      installCommitMessageHook
     ValidateCommitMessage path -> do
       T.putStrLn "Validating commit message format..."
       msg <- T.readFile path
@@ -116,4 +113,8 @@ parseCommitMessage = parseOnly commitMessageParser
 test :: Text
 test = "fix(Network.Mandrill): use correct lens names\n\nIt was broken, now it isn't.\nNot too tough to fix, really.\n\nFixes #1234\n"
 
-
+installCommitMessageHook = do
+  let commitMsgHookPath = ".git/hooks/commit-msg"
+  T.writeFile commitMsgHookPath "#!/bin/sh\nbrewkit validate:commit:message $1\n"
+  perms <- getPermissions commitMsgHookPath
+  setPermissions commitMsgHookPath $ perms { executable = True }
