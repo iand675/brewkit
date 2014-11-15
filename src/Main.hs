@@ -105,6 +105,8 @@ main = do
             ParseFailure str -> "Message parse failure: " <> T.pack str
             HeaderTooLong    -> "Header is too long"
             LineTooLong l    -> "Line too long: " <> l
+          T.putStrLn "Failing message:"
+          T.putStrLn msg
           exitFailure
         Right _ -> return ()
 
