@@ -19,6 +19,6 @@ executable brewkit
   main-is:             Main.hs
   -- other-modules:       
   other-extensions:    OverloadedStrings
-  build-depends:       base >=4.7 && <4.8, attoparsec >=0.12 && <0.13, text >=1.2 && <1.3, optparse-applicative >=0.11 && <0.12, directory
+  build-depends:       base, trifecta, parsers, text, optparse-applicative, directory, ansi-wl-pprint, bytestring, ansi-terminal, utf8-string, filepath, process, mtl
   hs-source-dirs:      src
   default-language:    Haskell2010
