@@ -3,24 +3,28 @@ module Main where
 import           Control.Monad
 import           Control.Monad.Trans
 import           Text.PrettyPrint.ANSI.Leijen (Doc, putDoc, indent)
-import           Text.Trifecta
+import           Text.Trifecta (Result(..), parseTest, parseByteString, eof)
 import           Text.Trifecta.Delta
-import qualified Data.List    as L
+import qualified Data.ByteString as B
+import qualified Data.ByteString.UTF8 as UTF8
+import qualified Data.Text       as T
+import qualified Data.List       as L
+import qualified Data.Map.Strict as S
 import           Data.Monoid
 import           Data.Text (Text)
-import qualified Data.Text    as T
 import           Data.Text.Encoding
 import qualified Data.Text.IO as T
-import qualified Data.ByteString.Char8 as B
-import           Data.ByteString.UTF8 as UTF8
 import           Options.Applicative hiding (Success, Failure, Parser)
 import           System.Console.ANSI
 import           System.Directory
 import           System.Exit
 import           System.FilePath
-import           System.IO
-import           System.Process
 import           Prelude             hiding (takeWhile)
+
+import           Formatter
+import           Git
+import           Parsers
+import           Types
 
 data Command
   = InstallHooks
@@ -37,90 +41,19 @@ commandParser = subparser
   <> command "changelog" (info (pure Changelog) (progDesc "Generate changelog"))
   )
 
-data CommitType = Feature
-                | Fix
-                | Docs
-                | Style
-                | Refactor
-                | Perf
-                | Test
-                | Chore
-                deriving (Show, Eq, Ord)
-
-data CommitMessage = CommitMessage
-  { commitMessageType    :: CommitType
-  , commitMessageScope   :: Text
-  , commitMessageSubject :: Text
-  , commitMessageBody    :: [Text]
-  , commitMessageFooter  :: [Text]
-  } deriving (Show)
-
-lineLength = 100
-
-validLength section = do
-  bl <- line
-  let tl = T.length $ decodeUtf8 bl
-  if tl > lineLength
-    then raiseErr $ failed (section ++ " line too long. Maximum is " ++ show lineLength ++ " chars, got " ++ show tl ++ " chars.")
-    else return ()
-
-match k v = string k *> pure v
-
-typeParser = choice $ map (uncurry match)
-  [ ("feature", Feature)
-  , ("fix", Fix)
-  , ("docs", Docs)
-  , ("style", Style)
-  , ("refactor", Refactor)
-  , ("perf", Perf)
-  , ("test", Test)
-  , ("chore", Chore)
-  ]
-
-wrappedBy :: Char -> Char -> Parser String
-wrappedBy l r = between (char l) (char r) $ many $ notChar r
-
-scopeParser :: Parser Text
-scopeParser = T.pack <$> wrappedBy '(' ')'
-
-endOfLine = optional (char '\r') >> char '\n' >> return ()
-
-notEOL :: Parser Char
-notEOL = noneOf "\r\n"
-
-nextSection :: Parser ()
-nextSection = endOfLine *> endOfLine *> pure ()
-
-commitMessageParser :: Parser CommitMessage
-commitMessageParser = do
-  type_ <- typeParser <?> "Type"
-  scope <- scopeParser <?> "Scope"
-  string ": "
-  subject <- T.pack <$> some notEOL <?> "Subject"
-  validLength "Subject"
-  endOfLine
-  endOfLine
-  body <- many $ do
-    res <- T.pack <$> some notEOL <?> "Body"
-    validLength "Body"
-    endOfLine
-    return res
-  endOfLine
-  footer <- many $ do
-    res <- T.pack <$> some notEOL <?> "Footer"
-    validLength "Footer"
-    endOfLine
-    return res
-  many endOfLine
-  return $ CommitMessage type_ scope subject body footer
-
 main :: IO ()
 main = do
   args <- execParser $ info commandParser idm
   case args of
     InstallHooks -> installCommitMessageHook
     ValidateCommitMessage path -> B.readFile path >>= validateCommitMessage path
-    Changelog -> return ()
+    Changelog -> do
+      commitResult <- parseFromHandle gitLogOutputs (Directed "git log" 0 0 0 0) =<< gitLogMessages
+      case commitResult of
+        Failure doc -> do
+          putDoc doc
+          exitFailure
+        Success commits -> mapM_ print commits
 
 parseCommitMessage :: Text -> IO ()
 parseCommitMessage = parseTest commitMessageParser . T.unpack
@@ -153,33 +86,12 @@ installCommitMessageHook = do
   perms <- getPermissions commitMsgHookPath
   setPermissions commitMsgHookPath $ perms { executable = True }
 
-gitLogOutputs :: Parser [CommitMessage]
-gitLogOutputs = sepBy1 commitMessageParser $ string "----END_OF_COMMIT----"
-
-gitLogMessages :: IO Handle
-gitLogMessages = do
-  (_, Just out, _, _) <- createProcess $ p { std_out = CreatePipe }
-  return out
-  where
-    p = proc "git" ["log", "--format=\"%B%n----END_OF_COMMIT----\""]
-
-parseFromHandle :: MonadIO m => Parser a -> Delta -> Handle -> m (Result a)
-parseFromHandle p d h = go $ stepParser startP mempty mempty
-  where
-    startP = release d *> p
-    go aStep = do
-      bs <- liftIO $ B.hGet h 4096
-      if bs == B.empty
-        then return $ starve aStep
-        else do
-          let aStep' = feed bs aStep
-          case aStep' of
-            StepFail _ _ -> return $ starve aStep'
-            _ -> go aStep'
-  
 {-
 installMessageTemplateHook = do
   let templateHookPath = ".git/hooks/prepare-commit-msg"
   T.writeFile templateHookPath "#!/bin/sh/\n"
 -}
+
+type Scope = Text
+type GroupedChangelog = S.Map CommitType (S.Map Scope CommitMessage)
 

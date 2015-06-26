@@ -17,8 +17,11 @@ cabal-version:       >=1.10
 
 executable brewkit
   main-is:             Main.hs
-  -- other-modules:       
+  other-modules:       Formatter,
+                       Git,
+                       Parsers,
+                       Types
   other-extensions:    OverloadedStrings
-  build-depends:       base, trifecta, parsers, text, optparse-applicative, directory, ansi-wl-pprint, bytestring, ansi-terminal, utf8-string, filepath, process, mtl
+  build-depends:       base, trifecta, parsers, text, optparse-applicative, directory, ansi-wl-pprint, bytestring, ansi-terminal, utf8-string, filepath, process, mtl, containers
   hs-source-dirs:      src
   default-language:    Haskell2010
