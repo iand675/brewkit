@@ -42,7 +42,7 @@ commitTemplateArgs = CommitMessageTemplate
 
 commandParser = subparser
   (  command "install" (info (pure InstallHooks) (progDesc "Install Git hooks for the brewtown workflow" ))
-  <> command "validate:commit:message" (info validateCommitArgs (progDesc "Validate a commit message"))
+  <> command "validate:commit" (info validateCommitArgs (progDesc "Validate a commit message"))
   <> command "template:commit-msg" (info commitTemplateArgs (progDesc "Modify a commit message file"))
   <> command "changelog" (info (pure Changelog) (progDesc "Generate changelog"))
   )
@@ -100,13 +100,10 @@ commitMessageTemplate path = do
       let templateAddOn = "#\n# Valid message format:\n# \ttype(scope): subject\n# \t<newline>\n# \tbody\n# \t<newline>\n# \tfooter\n"
       appendFile path templateAddOn
 
-test :: Text
-test = "fix(Network.Mandrill): use correct lens names\n\nIt was broken, now it isn't.\nNot too tough to fix, really.\n\nFixes #1234\n"
-
 installCommitMessageHook :: IO ()
 installCommitMessageHook = do
   let commitMsgHookPath = ".git/hooks/commit-msg"
-  T.writeFile commitMsgHookPath "#!/bin/sh\nbrewkit validate:commit:message $1\n"
+  T.writeFile commitMsgHookPath "#!/bin/sh\nbrewkit validate:commit $1\n"
   perms <- getPermissions commitMsgHookPath
   setPermissions commitMsgHookPath $ perms { executable = True }
 
