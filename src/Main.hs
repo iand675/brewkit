@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 module Main where
 import           Control.Monad
 import           Control.Monad.Trans
@@ -28,6 +29,7 @@ import           Types
 
 data Command
   = InstallHooks
+  | CommitMessageTemplate FilePath
   | ValidateCommitMessage FilePath
   | Changelog
   deriving (Show)
@@ -35,9 +37,13 @@ data Command
 validateCommitArgs = ValidateCommitMessage
   <$> (argument str (metavar "COMMIT_MSG_PATH"))
 
+commitTemplateArgs = CommitMessageTemplate
+  <$> (argument str (metavar "COMMIT_MSG_PATH"))
+
 commandParser = subparser
   (  command "install" (info (pure InstallHooks) (progDesc "Install Git hooks for the brewtown workflow" ))
   <> command "validate:commit:message" (info validateCommitArgs (progDesc "Validate a commit message"))
+  <> command "template:commit-msg" (info commitTemplateArgs (progDesc "Modify a commit message file"))
   <> command "changelog" (info (pure Changelog) (progDesc "Generate changelog"))
   )
 
@@ -45,7 +51,10 @@ main :: IO ()
 main = do
   args <- execParser $ info commandParser idm
   case args of
-    InstallHooks -> installCommitMessageHook
+    InstallHooks -> do
+      installCommitMessageHook
+      installMessageTemplateHook
+    CommitMessageTemplate path -> commitMessageTemplate path
     ValidateCommitMessage path -> B.readFile path >>= validateCommitMessage path
     Changelog -> do
       commitResult <- parseFromHandle gitLogOutputs (Directed "git log" 0 0 0 0) =<< gitLogMessages
@@ -58,10 +67,12 @@ main = do
 parseCommitMessage :: Text -> IO ()
 parseCommitMessage = parseTest commitMessageParser . T.unpack
 
+draftPath :: FilePath -> FilePath
+draftPath path = replaceBaseName path (takeBaseName path ++ "_DRAFT")
+
 validateCommitMessage :: FilePath -> B.ByteString -> IO ()
 validateCommitMessage path str = do
   T.putStr "Checking commit message format "
-  let draftPath = replaceBaseName path (takeBaseName path ++ "_DRAFT")
   case parseByteString (commitMessageParser <* eof) (Directed (UTF8.fromString path) 0 0 0 0) str of
     Failure doc -> do
       setSGR [SetColor Foreground Dull Red]
@@ -69,12 +80,25 @@ validateCommitMessage path str = do
       setSGR [Reset]
       putDoc $ indent 2 doc
       T.putStr "\n"
-      copyFile path draftPath
+      copyFile path $ draftPath path
       exitFailure
     _ -> do
       setSGR [SetColor Foreground Dull Green]
       T.putStrLn "✓"
       setSGR [Reset]
+      let draftP = draftPath path
+      draftExists <- doesFileExist draftP
+      when draftExists $ removeFile draftP
+
+commitMessageTemplate :: FilePath -> IO ()
+commitMessageTemplate path = do
+  let draftP = draftPath path
+  draftExists <- doesFileExist draftP
+  if draftExists
+    then renameFile draftP path
+    else do
+      let templateAddOn = "#\n# Valid message format:\n# \ttype(scope): subject\n# \t<newline>\n# \tbody\n# \t<newline>\n# \tfooter\n"
+      appendFile path templateAddOn
 
 test :: Text
 test = "fix(Network.Mandrill): use correct lens names\n\nIt was broken, now it isn't.\nNot too tough to fix, really.\n\nFixes #1234\n"
@@ -86,11 +110,12 @@ installCommitMessageHook = do
   perms <- getPermissions commitMsgHookPath
   setPermissions commitMsgHookPath $ perms { executable = True }
 
-{-
+installMessageTemplateHook :: IO ()
 installMessageTemplateHook = do
   let templateHookPath = ".git/hooks/prepare-commit-msg"
-  T.writeFile templateHookPath "#!/bin/sh/\n"
--}
+  T.writeFile templateHookPath "#!/bin/sh\nbrewkit template:commit-msg $1\n"
+  perms <- getPermissions templateHookPath
+  setPermissions templateHookPath $ perms { executable = True }
 
 type Scope = Text
 type GroupedChangelog = S.Map CommitType (S.Map Scope CommitMessage)
